@@ -1,8 +1,16 @@
+const http = require('http');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3000;
-const wss = new WebSocketServer({ port: PORT });
+
+// Servidor HTTP base (necesario para Railway)
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Pokemon Battle Server OK');
+});
+
+const wss = new WebSocketServer({ server });
 
 // salas[codigoSala] = { jugador1: ws, jugador2: ws, estado: {...} }
 const salas = {};
@@ -23,6 +31,8 @@ function otroJugador(sala, ws) {
 
 wss.on('connection', (ws) => {
   ws.id = uuidv4();
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
     let msg;
@@ -30,7 +40,6 @@ wss.on('connection', (ws) => {
 
     switch (msg.tipo) {
 
-      // ── CREAR SALA ──────────────────────────────────────────────
       case 'crear_sala': {
         let codigo;
         do { codigo = generarCodigo(); } while (salas[codigo]);
@@ -48,7 +57,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      // ── UNIRSE A SALA ───────────────────────────────────────────
       case 'unirse_sala': {
         const { codigo } = msg;
         const sala = salas[codigo];
@@ -71,7 +79,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      // ── REGISTRAR NOMBRE ────────────────────────────────────────
       case 'set_nombre': {
         const sala = salas[ws.codigoSala];
         if (!sala) return;
@@ -82,7 +89,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      // ── ELEGIR POKEMON ──────────────────────────────────────────
       case 'set_pokemon': {
         const sala = salas[ws.codigoSala];
         if (!sala) return;
@@ -91,7 +97,6 @@ wss.on('connection', (ws) => {
         const otro = otroJugador(sala, ws);
         enviar(otro, 'oponente_eligio', { jugador: ws.numJugador });
 
-        // Si ambos eligieron → mandar señal de batalla lista
         if (sala.pokemons[1] && sala.pokemons[2]) {
           const resultado = calcularResultado(sala);
           enviar(sala.jugador1, 'batalla_lista', {
@@ -112,7 +117,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      // ── JUGAR DE NUEVO ──────────────────────────────────────────
       case 'jugar_de_nuevo': {
         const sala = salas[ws.codigoSala];
         if (!sala) return;
@@ -135,19 +139,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-function calcularResultado(sala) {
-  const p1 = sala.pokemons[1];
-  const p2 = sala.pokemons[2];
-  if (p1.statTotal > p2.statTotal) return 'gane';
-  if (p2.statTotal > p1.statTotal) return 'perdi';
-  return 'empate';
-}
-
-function invertirResultado(resultado, sala) {
-  if (resultado === 'gane') return 'perdi';
-  if (resultado === 'perdi') return 'gane';
-  return 'empate';
-}
 // Mantener conexiones vivas
 setInterval(() => {
   wss.clients.forEach((ws) => {
@@ -157,9 +148,20 @@ setInterval(() => {
   });
 }, 30000);
 
-wss.on('connection', (ws) => {
-  ws.isAlive = true;
-  ws.on('pong', () => { ws.isAlive = true; });
-});
+function calcularResultado(sala) {
+  const p1 = sala.pokemons[1];
+  const p2 = sala.pokemons[2];
+  if (p1.statTotal > p2.statTotal) return 'gane';
+  if (p2.statTotal > p1.statTotal) return 'perdi';
+  return 'empate';
+}
 
-console.log(`🎮 Pokemon Battle Server corriendo en puerto ${PORT}`);
+function invertirResultado(resultado) {
+  if (resultado === 'gane') return 'perdi';
+  if (resultado === 'perdi') return 'gane';
+  return 'empate';
+}
+
+server.listen(PORT, () => {
+  console.log(`🎮 Pokemon Battle Server corriendo en puerto ${PORT}`);
+});
